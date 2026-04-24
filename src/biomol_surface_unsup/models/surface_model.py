@@ -6,6 +6,7 @@ import torch.nn as nn
 from biomol_surface_unsup.features.global_features import GlobalFeatureEncoder
 from biomol_surface_unsup.features.local_features import LocalFeatureBuilder
 from biomol_surface_unsup.geometry.sdf_ops import box_sdf
+from biomol_surface_unsup.utils.pairwise import chunked_atomic_union_sdf
 from biomol_surface_unsup.models.decoders.film_decoder import FiLMDecoder
 from biomol_surface_unsup.models.decoders.sdf_decoder import SDFDecoder
 from biomol_surface_unsup.models.decoders.siren_decoder import SirenDecoder
@@ -219,7 +220,21 @@ class SurfaceModel(nn.Module):
         if self.sdf_base_type == "box":
             if bbox_lower is None or bbox_upper is None:
                 raise ValueError("bbox_lower and bbox_upper are required when sdf_base.type='box'")
-            base_phi = box_sdf(query_points, bbox_lower, bbox_upper)
+            box_phi = box_sdf(query_points, bbox_lower, bbox_upper)
+            # Traditional VISM loose initialization: φ = min(box_sdf, atom_union_sdf)
+            # The zero level set is still the box boundary (loose), but the SDF
+            # interior encodes atomic geometry — matching the classical numerical
+            # level-set approach where the initial field carries atom information.
+            safe_coords = coords
+            safe_radii = radii
+            if atom_mask is not None:
+                safe_coords = coords.masked_fill(~atom_mask.unsqueeze(-1), 0.0)
+                safe_radii = radii.masked_fill(~atom_mask, 0.0)
+            with torch.no_grad():
+                atom_phi = chunked_atomic_union_sdf(
+                    safe_coords, safe_radii, query_points
+                )
+            base_phi = torch.min(box_phi, atom_phi)
             sdf = base_phi + self.residual_scale * raw_residual
         else:
             base_phi = None

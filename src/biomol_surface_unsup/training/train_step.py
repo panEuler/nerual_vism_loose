@@ -174,6 +174,7 @@ def train_step(
     adaptive_surface_sampling=False,
     adaptive_surface_oversample=8,
     adaptive_surface_candidate_chunk_size=4096,
+    pressure_override=None,
 ):
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -270,6 +271,7 @@ def train_step(
         out,
         loss_weights=loss_weights,
         loss_group_overrides=loss_group_overrides,
+        pressure_override=pressure_override,
     )
     if not torch.isfinite(losses["total"]):
         raise ValueError(f"non-finite total loss before backward: {float(losses['total'].detach().cpu())}")

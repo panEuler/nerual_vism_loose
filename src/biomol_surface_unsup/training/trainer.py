@@ -100,6 +100,15 @@ class Trainer:
                 initial_groups=initial_groups,
                 final_groups=final_groups,
             )
+        # Pressure annealing: step-function schedule for the pressure parameter.
+        self.pressure_schedule = None
+        if "initial_pressure" in anneal_cfg:
+            self.pressure_schedule = {
+                "initial": float(anneal_cfg["initial_pressure"]),
+                "final": float(loss_cfg.get("pressure", 0.01)),
+                "warmup_epochs": int(anneal_cfg.get("pressure_warmup_epochs",
+                                                     anneal_cfg.get("warmup_epochs", 0))),
+            }
         self.optimizer = build_optimizer(
             self.model,
             lr=float(train_cfg.get("lr", 1e-3)),
@@ -214,6 +223,14 @@ class Trainer:
                     f"loss_weights={loss_weights if loss_weights is not None else {}} "
                     f"loss_group_overrides={loss_group_overrides if loss_group_overrides is not None else {}}"
                 )
+            # Pressure annealing
+            pressure_override = None
+            if self.pressure_schedule is not None:
+                if epoch < self.pressure_schedule["warmup_epochs"]:
+                    pressure_override = self.pressure_schedule["initial"]
+                else:
+                    pressure_override = self.pressure_schedule["final"]
+                print(f"[trainer] epoch={epoch} pressure={pressure_override}")
             latest_metrics = None
             epoch_total_loss = 0.0
             num_batches = 0
@@ -233,6 +250,7 @@ class Trainer:
                         adaptive_surface_sampling=self.adaptive_surface_sampling,
                         adaptive_surface_oversample=self.adaptive_surface_oversample,
                         adaptive_surface_candidate_chunk_size=self.adaptive_surface_candidate_chunk_size,
+                        pressure_override=pressure_override,
                     )
                 except RuntimeError as exc:
                     print(

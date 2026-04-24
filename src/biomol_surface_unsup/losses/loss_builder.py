@@ -126,6 +126,7 @@ def build_loss_fn(cfg: dict[str, object]):
         model_out: dict[str, torch.Tensor],
         loss_weights: dict[str, float] | None = None,
         loss_group_overrides: dict[str, list[str]] | None = None,
+        pressure_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
         """Compute and aggregate all configured unsupervised physical losses.
         
@@ -249,11 +250,12 @@ def build_loss_fn(cfg: dict[str, object]):
                 reduction="none",
             ) * pred_sdf.new_tensor(-2.0 * gamma_0 * tolman_length)
         pressure_energy = zero_per_sample
+        current_pressure = pressure if pressure_override is None else float(pressure_override)
         if component_weights["pressure_volume"] != 0.0:
             pressure_energy = pressure_volume_loss(
                 pred_sdf,
                 mask=loss_masks["pressure_volume"],
-                pressure=pressure,
+                pressure=current_pressure,
                 eps=heaviside_eps,
                 domain_volume=bbox_volume,
                 reduction="none",
