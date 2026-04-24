@@ -12,3 +12,9 @@ save_every: 5
 output_dir: outputs/checkpoints/loose_box_vism
 
 grad_clip_norm: 1.0
+
+# Replace static surface-band samples with candidates selected near the current
+# predicted zero level-set during training.
+adaptive_surface_sampling: true
+adaptive_surface_oversample: 8
+adaptive_surface_candidate_chunk_size: 4096

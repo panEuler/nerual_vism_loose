@@ -228,9 +228,9 @@ class SurfaceModel(nn.Module):
         if query_mask is not None:
             sdf = sdf * query_mask.to(sdf.dtype)
         output = {"sdf": sdf}
+        if self.sdf_base_type == "box":
+            output["raw_residual"] = raw_residual
+            output["base_phi"] = base_phi
         if return_aux:
             output.update({"z_local": z_local, "z_global": z_global_expanded, "fused": fused, **local})
-            output["raw_residual"] = raw_residual
-            if base_phi is not None:
-                output["base_phi"] = base_phi
         return output

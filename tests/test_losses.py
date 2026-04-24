@@ -384,6 +384,62 @@ def test_train_step_reports_grad_norm_when_clipping_enabled() -> None:
     assert metrics["grad_norm"] >= 0.0
 
 
+def test_train_step_adaptive_surface_sampling_reports_selected_band() -> None:
+    class PlaneModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.bias = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32))
+
+        def forward(self, coords, atom_types, radii, query_points, atom_mask=None, query_mask=None):
+            del coords, atom_types, radii, atom_mask
+            sdf = query_points[..., 0] + self.bias
+            if query_mask is not None:
+                sdf = sdf * query_mask.to(sdf.dtype)
+            return {"sdf": sdf}
+
+    torch.manual_seed(0)
+    batch, _ = _build_batch()
+    batch["domain_bbox_lower"] = torch.tensor([[-1.0, -1.0, -1.0], [-1.0, -1.0, -1.0]], dtype=torch.float32)
+    batch["domain_bbox_upper"] = torch.tensor([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], dtype=torch.float32)
+    batch["bbox_lower"] = batch["domain_bbox_lower"]
+    batch["bbox_upper"] = batch["domain_bbox_upper"]
+    batch["bbox_volume"] = torch.tensor([8.0, 8.0], dtype=torch.float32)
+    loss_fn = build_loss_fn(
+        {
+            "loss": {
+                "losses": {
+                    "containment": {"weight": 0.0, "groups": ["containment"]},
+                    "weak_prior": {"weight": 0.0, "groups": ["surface_band"]},
+                    "area": {"weight": 1.0, "groups": ["surface_band"]},
+                    "tolman_curvature": {"weight": 0.0, "groups": ["surface_band"]},
+                    "pressure_volume": {"weight": 0.0, "groups": ["global"]},
+                    "lj_body": {"weight": 0.0, "groups": ["global"]},
+                    "electrostatic": {"weight": 0.0, "groups": ["global"]},
+                    "eikonal": {"weight": 0.0, "groups": ["global", "surface_band"]},
+                }
+            }
+        }
+    )
+    model = PlaneModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+    metrics = train_step(
+        model,
+        batch,
+        loss_fn,
+        optimizer,
+        device="cpu",
+        adaptive_surface_sampling=True,
+        adaptive_surface_oversample=32,
+        adaptive_surface_candidate_chunk_size=16,
+    )
+
+    assert metrics["adaptive_surface_band_count"] == pytest.approx(2.0)
+    assert metrics["adaptive_surface_candidate_count"] == pytest.approx(66.0)
+    assert metrics["adaptive_surface_phi_abs_mean"] >= 0.0
+    assert metrics["adaptive_surface_phi_abs_max"] < 0.25
+
+
 def test_loose_box_single_batch_forward_loss_is_finite() -> None:
     torch.manual_seed(0)
     dataset = MoleculeDataset(

@@ -39,6 +39,18 @@ class Trainer:
         self.output_dir = Path(train_cfg.get("output_dir", "outputs/checkpoints"))
         self.resume_from = train_cfg.get("resume_from")
         self.grad_clip_norm = train_cfg.get("grad_clip_norm")
+        self.adaptive_surface_sampling = bool(
+            data_cfg.get("adaptive_surface_sampling", train_cfg.get("adaptive_surface_sampling", False))
+        )
+        self.adaptive_surface_oversample = int(
+            data_cfg.get("adaptive_surface_oversample", train_cfg.get("adaptive_surface_oversample", 8))
+        )
+        self.adaptive_surface_candidate_chunk_size = int(
+            data_cfg.get(
+                "adaptive_surface_candidate_chunk_size",
+                train_cfg.get("adaptive_surface_candidate_chunk_size", 4096),
+            )
+        )
         batch_size = int(train_cfg.get("batch_size", 1))
         raw_num_samples = data_cfg.get("num_samples")
         dataset_num_samples = int(raw_num_samples) if raw_num_samples is not None else None
@@ -168,6 +180,21 @@ class Trainer:
         for name in ("vism_total_energy", "vism_total_density"):
             if name in metrics:
                 summary[name] = round(float(metrics[name]), 6)
+        for name in (
+            "raw_residual_abs_mean",
+            "raw_residual_abs_max",
+            "sdf_minus_base_abs_mean",
+            "delta_band_count",
+            "area_delta_band_count",
+            "lj_body_delta_band_count",
+            "electrostatic_delta_band_count",
+            "adaptive_surface_band_count",
+            "adaptive_surface_candidate_count",
+            "adaptive_surface_phi_abs_mean",
+            "adaptive_surface_phi_abs_max",
+        ):
+            if name in metrics:
+                summary[name] = round(float(metrics[name]), 6)
         return summary
 
     def train(self):
@@ -203,6 +230,9 @@ class Trainer:
                         loss_weights=loss_weights,
                         loss_group_overrides=loss_group_overrides,
                         grad_clip_norm=self.grad_clip_norm,
+                        adaptive_surface_sampling=self.adaptive_surface_sampling,
+                        adaptive_surface_oversample=self.adaptive_surface_oversample,
+                        adaptive_surface_candidate_chunk_size=self.adaptive_surface_candidate_chunk_size,
                     )
                 except RuntimeError as exc:
                     print(

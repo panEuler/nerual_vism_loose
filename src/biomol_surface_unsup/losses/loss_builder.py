@@ -364,8 +364,16 @@ def build_loss_fn(cfg: dict[str, object]):
         losses["global_count"] = _masked_count(base_masks["global"], pred_sdf.dtype)
         losses["containment_count"] = _masked_count(base_masks["containment"], pred_sdf.dtype)
         losses["surface_band_count"] = _masked_count(base_masks["surface_band"], pred_sdf.dtype)
+        delta_band = pred_sdf.detach().abs() <= float(delta_eps)
+        heaviside_band = pred_sdf.detach().abs() <= float(heaviside_eps)
+        losses["delta_band_count"] = _masked_count(delta_band & query_mask, pred_sdf.dtype)
+        losses["heaviside_band_count"] = _masked_count(heaviside_band & query_mask, pred_sdf.dtype)
         for loss_name in SUPPORTED_LOSSES:
             losses[f"{loss_name}_count"] = _masked_count(loss_masks[loss_name], pred_sdf.dtype)
+            losses[f"{loss_name}_delta_band_count"] = _masked_count(
+                delta_band & loss_masks[loss_name],
+                pred_sdf.dtype,
+            )
 
         total = pred_sdf.new_zeros(())
         for loss_name in SUPPORTED_LOSSES:
