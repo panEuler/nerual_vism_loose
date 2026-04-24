@@ -1,0 +1,67 @@
+# VISM-style objective with loose-box residual initialization.
+# The physical components are evaluated as energy density G_i / bbox_volume_i.
+vism_objective: energy_density
+weak_prior_target: box
+
+losses:
+  containment:
+    weight: 0.0
+    groups: [containment]
+  weak_prior:
+    weight: 0.2
+    groups: [surface_band]
+  area:
+    weight: 1.0
+    groups: [global]
+  tolman_curvature:
+    weight: 1.0
+    groups: [global]
+  pressure_volume:
+    weight: 1.0
+    groups: [global]
+  lj_body:
+    weight: 1.0
+    groups: [global]
+  electrostatic:
+    weight: 1.0
+    groups: [global]
+  eikonal:
+    weight: 0.1
+    groups: [global, surface_band]
+
+pressure: 0.0
+rho_0: 0.0331
+gamma_0: 0.1315
+tolman_length: 1.0
+tolman_fd_offset: 0.1
+eps_solvent: 78.0
+eps_solute: 1.0
+electrostatic_dist_eps: 1.0
+heaviside_eps: 0.1
+delta_eps: 0.1
+containment_margin: 0.5
+
+anneal:
+  warmup_epochs: 20
+  initial_groups:
+    weak_prior: [containment, surface_band]
+  final_groups:
+    weak_prior: [surface_band]
+  initial_weights:
+    containment: 0.0
+    weak_prior: 0.2
+    area: 1.0
+    tolman_curvature: 0.0
+    pressure_volume: 1.0
+    lj_body: 1.0
+    electrostatic: 1.0
+    eikonal: 0.1
+  final_weights:
+    containment: 0.0
+    weak_prior: 0.0
+    area: 1.0
+    tolman_curvature: 1.0
+    pressure_volume: 1.0
+    lj_body: 1.0
+    electrostatic: 1.0
+    eikonal: 0.1

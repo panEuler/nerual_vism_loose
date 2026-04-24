@@ -1,0 +1,13 @@
+experiment_name: debug_loose_box_vism
+
+data:
+  config: configs/data/toy.yaml
+
+model:
+  config: configs/model/local_global.yaml
+
+loss:
+  config: configs/loss/vism_physical.yaml
+
+train:
+  config: configs/train/debug.yaml

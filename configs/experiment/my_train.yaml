@@ -1,0 +1,13 @@
+experiment_name: train_loose_box_vism
+
+data:
+  config: configs/data/protein_dataset.yaml
+
+model:
+  config: configs/model/local_egnn.yaml
+
+loss:
+  config: configs/loss/vism_physical.yaml
+
+train:
+  config: configs/train/base.yaml

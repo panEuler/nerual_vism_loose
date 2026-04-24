@@ -1,0 +1,31 @@
+name: local_egnn_box_residual
+
+local_builder:
+  atom_embed_dim: 256
+  rbf_dim: 16
+  cutoff: 8.0
+  max_neighbors: 64
+
+local_encoder:
+  type: deepsets
+  hidden_dim: 256
+  out_dim: 256
+  num_layers: 2
+
+global_encoder:
+  hidden_dim: 256
+  out_dim: 256
+
+decoder:
+  type: mlp
+  hidden_dim: 256
+  num_layers: 3
+
+position_encoding:
+  enabled: true
+  n_freq: 6
+
+sdf_base:
+  type: box
+  residual_scale: 1.0
+  zero_init_output: true
