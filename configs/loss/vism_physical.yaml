@@ -10,6 +10,9 @@ losses:
   containment:
     weight: 0.0
     groups: [containment]
+  outside:
+    weight: 1.0
+    groups: [bbox_surface]
   weak_prior:
     weight: 0.0
     groups: [surface_band]
@@ -43,6 +46,7 @@ electrostatic_dist_eps: 1.0
 heaviside_eps: 0.1
 delta_eps: 0.1
 containment_margin: 0.5
+outside_margin: 0.5
 
 anneal:
   # epoch 0-4: fit bbox SDF only.
@@ -54,6 +58,7 @@ anneal:
   initial_weights:
     init_sdf: 1.0
     containment: 0.0
+    outside: 1.0
     weak_prior: 0.0
     area: 0.0
     tolman_curvature: 0.0
@@ -64,6 +69,7 @@ anneal:
   final_weights:
     init_sdf: 0.01
     containment: 0.0
+    outside: 1.0
     weak_prior: 0.0
     area: 1.0
     tolman_curvature: 1.0

@@ -4,12 +4,13 @@ import torch
 
 from biomol_surface_unsup.datasets.sampling import (
     QUERY_GROUP_AREA,
+    QUERY_GROUP_BBOX_SURFACE,
     QUERY_GROUP_CONTAINMENT,
     QUERY_GROUP_GLOBAL,
     QUERY_GROUP_SURFACE_BAND,
 )
 from biomol_surface_unsup.losses.area import _safe_query_grads, area_loss, mean_curvature_integral_fd
-from biomol_surface_unsup.losses.containment import containment_loss
+from biomol_surface_unsup.losses.containment import containment_loss, outside_loss
 from biomol_surface_unsup.losses.eikonal import eikonal_loss
 from biomol_surface_unsup.losses.electrostatics import electrostatic_free_energy_cfa
 from biomol_surface_unsup.losses.vdw import lj_body_integral
@@ -26,11 +27,13 @@ QUERY_GROUP_IDS = {
     "containment": QUERY_GROUP_CONTAINMENT,
     "surface_band": QUERY_GROUP_SURFACE_BAND,
     "area": QUERY_GROUP_AREA,
+    "bbox_surface": QUERY_GROUP_BBOX_SURFACE,
 }
 
 SUPPORTED_LOSSES = (
     "init_sdf",
     "containment",
+    "outside",
     "weak_prior",
     "area",
     "tolman_curvature",
@@ -133,6 +136,7 @@ def build_loss_fn(cfg: dict[str, object]):
     delta_eps = float(loss_cfg.get("delta_eps", 0.1))
     heaviside_eps = float(loss_cfg.get("heaviside_eps", 0.1))
     containment_margin = float(loss_cfg.get("containment_margin", 0.5))
+    outside_margin = float(loss_cfg.get("outside_margin", containment_margin))
     pressure = float(loss_cfg.get("pressure", 0.01))
     rho_0 = float(loss_cfg.get("rho_0", 0.0334))
     gamma_0 = float(loss_cfg.get("gamma_0", loss_cfg.get("surface_tension", 0.1315)))
@@ -228,6 +232,7 @@ def build_loss_fn(cfg: dict[str, object]):
             "containment": _group_mask(query_group, query_mask, ["containment"]),
             "surface_band": _group_mask(query_group, query_mask, ["surface_band"]),
             "area": _group_mask(query_group, query_mask, ["area"]),
+            "bbox_surface": _group_mask(query_group, query_mask, ["bbox_surface"]),
         }
         active_groups = {}
         for loss_name in SUPPORTED_LOSSES:
@@ -404,6 +409,11 @@ def build_loss_fn(cfg: dict[str, object]):
                 margin=containment_margin,
                 mask=loss_masks["containment"],
             ),
+            "outside": outside_loss(
+                pred_sdf,
+                margin=outside_margin,
+                mask=loss_masks["outside"],
+            ),
         }
         if effective_weight("init_sdf", loss_weights) != 0.0:
             losses["init_sdf"] = _box_init_sdf_loss(
@@ -448,6 +458,7 @@ def build_loss_fn(cfg: dict[str, object]):
         losses["containment_count"] = _masked_count(base_masks["containment"], pred_sdf.dtype)
         losses["surface_band_count"] = _masked_count(base_masks["surface_band"], pred_sdf.dtype)
         losses["area_query_count"] = _masked_count(base_masks["area"], pred_sdf.dtype)
+        losses["bbox_surface_count"] = _masked_count(base_masks["bbox_surface"], pred_sdf.dtype)
         if area_importance_volume is not None:
             losses["area_importance_volume"] = area_importance_volume.mean()
         delta_band = pred_sdf.detach().abs() <= float(delta_eps)

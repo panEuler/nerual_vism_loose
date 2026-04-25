@@ -84,6 +84,8 @@ class Trainer:
                 data_cfg.get("surface_band_width", data_cfg.get("surface_bandwidth", 0.25))
             ),
             num_area_points=int(data_cfg.get("num_area_points", data_cfg.get("area_num_points", 0))),
+            num_bbox_surface_points=int(data_cfg.get("num_bbox_surface_points", data_cfg.get("outside_num_points", 0))),
+            bbox_surface_band_width=float(data_cfg.get("bbox_surface_band_width", 0.0)),
         )
         self.train_loader = DataLoader(
             self.train_dataset,
@@ -207,6 +209,8 @@ class Trainer:
                 summary[name] = round(float(metrics[name]), 6)
         if "init_sdf" in metrics:
             summary["init_sdf"] = round(float(metrics["init_sdf"]), 6)
+        if "outside" in metrics:
+            summary["outside"] = round(float(metrics["outside"]), 6)
         for name in ("vism_total_energy", "vism_total_density"):
             if name in metrics:
                 summary[name] = round(float(metrics[name]), 6)
@@ -219,6 +223,9 @@ class Trainer:
             "delta_band_count",
             "area_delta_band_count",
             "area_query_count",
+            "bbox_surface_count",
+            "outside_count",
+            "outside_delta_band_count",
             "area_importance_band_count",
             "area_importance_candidate_count",
             "area_importance_hit_count",
@@ -236,6 +243,7 @@ class Trainer:
             "adaptive_surface_phi_abs_mean",
             "adaptive_surface_phi_abs_max",
             "sampling_area",
+            "sampling_bbox_surface",
         ):
             if name in metrics:
                 summary[name] = round(float(metrics[name]), 6)

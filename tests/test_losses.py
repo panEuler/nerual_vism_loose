@@ -7,13 +7,14 @@ torch = pytest.importorskip("torch")
 
 from biomol_surface_unsup.datasets.sampling import (
     QUERY_GROUP_AREA,
+    QUERY_GROUP_BBOX_SURFACE,
     QUERY_GROUP_CONTAINMENT,
     QUERY_GROUP_GLOBAL,
     QUERY_GROUP_SURFACE_BAND,
 )
 from biomol_surface_unsup.datasets.collate import collate_fn
 from biomol_surface_unsup.datasets.molecule_dataset import MoleculeDataset
-from biomol_surface_unsup.losses.containment import containment_loss
+from biomol_surface_unsup.losses.containment import containment_loss, outside_loss
 from biomol_surface_unsup.losses.eikonal import eikonal_loss
 from biomol_surface_unsup.losses.lj_body import lj_body_integral
 from biomol_surface_unsup.losses.pressure_volume import pressure_volume_loss
@@ -38,6 +39,15 @@ def test_containment_loss_uses_margin_penalty() -> None:
     mask = torch.tensor([[True, True, True]])
     value = containment_loss(pred_sdf, margin=0.5, mask=mask)
     expected = torch.tensor([0.0, 0.0, 0.36], dtype=torch.float32).mean()
+    assert torch.allclose(value, expected)
+
+
+def test_outside_loss_uses_margin_penalty() -> None:
+    pred_sdf = torch.tensor([[-0.1, 0.4, 0.8]], dtype=torch.float32)
+    mask = torch.tensor([[True, True, False]])
+    value = outside_loss(pred_sdf, margin=0.5, mask=mask)
+    expected = torch.tensor([0.36, 0.01], dtype=torch.float32).mean()
+
     assert torch.allclose(value, expected)
 
 
@@ -94,6 +104,7 @@ def test_normalize_loss_config_preserves_default_behavior() -> None:
     )
 
     assert normalized["losses"]["containment"] == {"weight": 2.0, "groups": ["containment"]}
+    assert normalized["losses"]["outside"] == {"weight": 0.0, "groups": ["bbox_surface"]}
     assert normalized["losses"]["weak_prior"] == {"weight": 0.5, "groups": ["surface_band"]}
     assert normalized["losses"]["area"] == {"weight": 1.0, "groups": ["surface_band"]}
     assert normalized["losses"]["pressure_volume"] == {"weight": 0.5, "groups": ["global"]}
@@ -268,6 +279,53 @@ def test_build_loss_fn_supports_multi_group_union_masks() -> None:
     assert losses["eikonal_count"].item() == pytest.approx(4.0)
     assert losses["containment"].item() >= 0.0
     assert losses["total"].ndim == 0
+
+
+def test_build_loss_fn_supports_bbox_surface_outside_loss() -> None:
+    batch, pred_sdf = _build_batch()
+    bbox_points = torch.ones((2, 1, 3), dtype=batch["query_points"].dtype)
+    batch["query_points"] = torch.cat([batch["query_points"].detach(), bbox_points], dim=1).requires_grad_(True)
+    pred_values = torch.cat([pred_sdf.detach(), torch.tensor([[0.1], [0.8]], dtype=pred_sdf.dtype)], dim=1)
+    pred_sdf = batch["query_points"][..., 0] * 0.0 + pred_values
+    batch["query_group"] = torch.cat(
+        [
+            batch["query_group"],
+            torch.full((2, 1), QUERY_GROUP_BBOX_SURFACE, dtype=torch.long),
+        ],
+        dim=1,
+    )
+    batch["query_mask"] = torch.cat(
+        [
+            batch["query_mask"],
+            torch.ones((2, 1), dtype=torch.bool),
+        ],
+        dim=1,
+    )
+    loss_fn = build_loss_fn(
+        {
+            "loss": {
+                "outside_margin": 0.5,
+                "losses": {
+                    "containment": {"weight": 0.0, "groups": ["containment"]},
+                    "outside": {"weight": 1.0, "groups": ["bbox_surface"]},
+                    "weak_prior": {"weight": 0.0, "groups": ["surface_band"]},
+                    "area": {"weight": 0.0, "groups": ["surface_band"]},
+                    "tolman_curvature": {"weight": 0.0, "groups": ["surface_band"]},
+                    "pressure_volume": {"weight": 0.0, "groups": ["global"]},
+                    "lj_body": {"weight": 0.0, "groups": ["global"]},
+                    "electrostatic": {"weight": 0.0, "groups": ["global"]},
+                    "eikonal": {"weight": 0.0, "groups": ["global", "surface_band"]},
+                }
+            }
+        }
+    )
+
+    losses = loss_fn(batch, {"sdf": pred_sdf})
+
+    assert losses["bbox_surface_count"].item() == pytest.approx(2.0)
+    assert losses["outside_count"].item() == pytest.approx(2.0)
+    assert losses["outside"].item() == pytest.approx(0.08)
+    assert losses["total"].item() == pytest.approx(losses["outside"].item())
 
 
 def test_build_loss_fn_handles_empty_masks_from_configured_groups() -> None:

@@ -6,6 +6,7 @@ import yaml
 DEFAULT_LOSS_GROUPS = {
     "init_sdf": ["global", "containment", "surface_band"],
     "containment": ["containment"],
+    "outside": ["bbox_surface"],
     "weak_prior": ["surface_band"],
     "area": ["surface_band"],
     "tolman_curvature": ["global"],
@@ -18,6 +19,7 @@ DEFAULT_LOSS_GROUPS = {
 DEFAULT_LOSS_WEIGHTS = {
     "init_sdf": 0.0,
     "containment": 0.0,
+    "outside": 0.0,
     "weak_prior": 0.5,
     "area": 1.0,
     "tolman_curvature": 0.0,
@@ -29,6 +31,7 @@ DEFAULT_LOSS_WEIGHTS = {
 
 LEGACY_LOSS_WEIGHT_KEYS = {
     "containment": "lambda_containment",
+    "outside": "lambda_outside",
     "weak_prior": "lambda_prior",
     "area": "lambda_area",
     "pressure_volume": "lambda_volume",

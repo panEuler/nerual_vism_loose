@@ -14,6 +14,7 @@ QUERY_GROUP_GLOBAL = 0
 QUERY_GROUP_CONTAINMENT = 1
 QUERY_GROUP_SURFACE_BAND = 2
 QUERY_GROUP_AREA = 3
+QUERY_GROUP_BBOX_SURFACE = 4
 
 
 def _infer_bond_pairs(
@@ -149,6 +150,8 @@ def sample_query_points(
     containment_jitter: float = 0.15,
     surface_band_width: float = 0.25,
     num_area_points: int = 0,
+    num_bbox_surface_points: int = 0,
+    bbox_surface_band_width: float = 0.0,
     initialization_mode: str = "tight_atomic",
     loose_surface_padding: float | None = None,
     domain_padding: float | None = None,
@@ -167,6 +170,7 @@ def sample_query_points(
     - containment: atom-centered / near-atom anchors
     - surface-band: samples near a toy atomic-union narrow band
     - area: extra bbox-uniform samples used only to reduce area integral variance
+    - bbox-surface: extra domain-bbox face samples used as outside anchors
     """
     if torch is None or not isinstance(coords, torch.Tensor):
         raise RuntimeError("sample_query_points requires torch in the current toy training path")
@@ -180,6 +184,7 @@ def sample_query_points(
     num_containment = max(1, num_query_points // 4)
     num_surface = max(1, num_query_points - num_global - num_containment)
     num_area = max(0, int(num_area_points))
+    num_bbox_surface = max(0, int(num_bbox_surface_points))
     total = num_global + num_containment + num_surface
     if total != num_query_points:
         num_surface += num_query_points - total
@@ -260,6 +265,12 @@ def sample_query_points(
             surface_samples = candidate_points[sort_index[:num_surface]]  # [Qs, 3]
 
     area_samples = _sample_uniform_box(domain_lower, domain_upper, num_area)
+    bbox_surface_samples = _sample_box_surface_band(
+        domain_lower,
+        domain_upper,
+        num_bbox_surface,
+        band_width=bbox_surface_band_width,
+    )
 
     point_chunks = [global_samples, containment_points, surface_samples]
     group_chunks = [
@@ -270,6 +281,11 @@ def sample_query_points(
     if num_area > 0:
         point_chunks.append(area_samples)
         group_chunks.append(torch.full((num_area,), QUERY_GROUP_AREA, dtype=torch.long, device=coords.device))
+    if num_bbox_surface > 0:
+        point_chunks.append(bbox_surface_samples)
+        group_chunks.append(
+            torch.full((num_bbox_surface,), QUERY_GROUP_BBOX_SURFACE, dtype=torch.long, device=coords.device)
+        )
 
     query_points = torch.cat(point_chunks, dim=0)  # [Q, 3]
     query_group = torch.cat(group_chunks, dim=0)  # [Q]
@@ -281,6 +297,8 @@ def sample_query_points(
     }
     if num_area > 0:
         sampling_counts["area"] = int(num_area)
+    if num_bbox_surface > 0:
+        sampling_counts["bbox_surface"] = int(num_bbox_surface)
 
     return {
         "query_points": query_points,
