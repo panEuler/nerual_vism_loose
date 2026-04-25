@@ -6,6 +6,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from biomol_surface_unsup.datasets.sampling import (
+    QUERY_GROUP_AREA,
     QUERY_GROUP_CONTAINMENT,
     QUERY_GROUP_GLOBAL,
     QUERY_GROUP_SURFACE_BAND,
@@ -30,6 +31,27 @@ def test_sample_query_points_returns_hierarchical_groups() -> None:
     assert int((sampling["query_group"] == QUERY_GROUP_GLOBAL).sum()) == 4
     assert int((sampling["query_group"] == QUERY_GROUP_CONTAINMENT).sum()) == 2
     assert int((sampling["query_group"] == QUERY_GROUP_SURFACE_BAND).sum()) == 2
+
+
+def test_sample_query_points_can_add_area_only_uniform_points() -> None:
+    torch.manual_seed(0)
+    coords = torch.tensor([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]], dtype=torch.float32)
+    radii = torch.tensor([1.2, 1.3], dtype=torch.float32)
+
+    sampling = sample_query_points(
+        coords=coords,
+        radii=radii,
+        num_query_points=8,
+        num_area_points=5,
+        padding=2.0,
+    )
+    area_points = sampling["query_points"][sampling["query_group"] == QUERY_GROUP_AREA]
+
+    assert tuple(sampling["query_points"].shape) == (13, 3)
+    assert sampling["sampling_counts"] == {"global": 4, "containment": 2, "surface_band": 2, "area": 5}
+    assert area_points.shape[0] == 5
+    assert torch.all(area_points >= sampling["bbox_lower"].unsqueeze(0))
+    assert torch.all(area_points <= sampling["bbox_upper"].unsqueeze(0))
 
 
 def test_surface_band_points_are_close_to_toy_atomic_union_boundary() -> None:

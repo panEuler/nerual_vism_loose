@@ -15,7 +15,7 @@ losses:
     groups: [surface_band]
   area:
     weight: 1.0
-    groups: [global]
+    groups: [global, area]
   tolman_curvature:
     weight: 1.0
     groups: [global]

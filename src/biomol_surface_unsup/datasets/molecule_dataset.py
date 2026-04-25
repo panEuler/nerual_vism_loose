@@ -119,6 +119,7 @@ class MoleculeDataset(Dataset):
         domain_padding: float | None = None,
         containment_jitter: float = 0.15,
         surface_band_width: float = 0.25,
+        num_area_points: int = 0,
         split_seed: int = _DEFAULT_SPLIT_SEED,
     ) -> None:
         del num_atoms  # Real processed samples determine atom count from disk.
@@ -134,6 +135,7 @@ class MoleculeDataset(Dataset):
         self.domain_padding = float(self.bbox_padding) if domain_padding is None else float(domain_padding)
         self.containment_jitter = float(containment_jitter)
         self.surface_band_width = float(surface_band_width)
+        self.num_area_points = int(num_area_points)
         self.num_atom_types = len(ATOM_TYPE_TO_ID)
         self.records = self._discover_records()
         if num_samples is not None:
@@ -268,6 +270,7 @@ class MoleculeDataset(Dataset):
             radii=radii,
             containment_jitter=self.containment_jitter,
             surface_band_width=self.surface_band_width,
+            num_area_points=self.num_area_points,
             initialization_mode=self.initialization_mode,
             loose_surface_padding=self.loose_surface_padding,
             domain_padding=self.domain_padding,

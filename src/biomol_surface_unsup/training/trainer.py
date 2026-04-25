@@ -51,6 +51,21 @@ class Trainer:
                 train_cfg.get("adaptive_surface_candidate_chunk_size", 4096),
             )
         )
+        self.area_importance_sampling = bool(
+            data_cfg.get("area_importance_sampling", train_cfg.get("area_importance_sampling", False))
+        )
+        self.area_importance_band_width = float(
+            data_cfg.get("area_importance_band_width", train_cfg.get("area_importance_band_width", 0.25))
+        )
+        self.area_importance_oversample = int(
+            data_cfg.get("area_importance_oversample", train_cfg.get("area_importance_oversample", 32))
+        )
+        self.area_importance_candidate_chunk_size = int(
+            data_cfg.get(
+                "area_importance_candidate_chunk_size",
+                train_cfg.get("area_importance_candidate_chunk_size", 4096),
+            )
+        )
         batch_size = int(train_cfg.get("batch_size", 1))
         raw_num_samples = data_cfg.get("num_samples")
         dataset_num_samples = int(raw_num_samples) if raw_num_samples is not None else None
@@ -68,6 +83,7 @@ class Trainer:
             surface_band_width=float(
                 data_cfg.get("surface_band_width", data_cfg.get("surface_bandwidth", 0.25))
             ),
+            num_area_points=int(data_cfg.get("num_area_points", data_cfg.get("area_num_points", 0))),
         )
         self.train_loader = DataLoader(
             self.train_dataset,
@@ -202,12 +218,24 @@ class Trainer:
             "sdf_minus_base_abs_mean",
             "delta_band_count",
             "area_delta_band_count",
+            "area_query_count",
+            "area_importance_band_count",
+            "area_importance_candidate_count",
+            "area_importance_hit_count",
+            "area_importance_hit_rate",
+            "area_importance_volume",
+            "area_importance_volume_mean",
+            "area_importance_phi_abs_mean",
+            "area_importance_phi_abs_max",
+            "area_importance_replacement_count",
+            "area_importance_fallback_count",
             "lj_body_delta_band_count",
             "electrostatic_delta_band_count",
             "adaptive_surface_band_count",
             "adaptive_surface_candidate_count",
             "adaptive_surface_phi_abs_mean",
             "adaptive_surface_phi_abs_max",
+            "sampling_area",
         ):
             if name in metrics:
                 summary[name] = round(float(metrics[name]), 6)
@@ -257,6 +285,10 @@ class Trainer:
                         adaptive_surface_sampling=self.adaptive_surface_sampling,
                         adaptive_surface_oversample=self.adaptive_surface_oversample,
                         adaptive_surface_candidate_chunk_size=self.adaptive_surface_candidate_chunk_size,
+                        area_importance_sampling=self.area_importance_sampling,
+                        area_importance_band_width=self.area_importance_band_width,
+                        area_importance_oversample=self.area_importance_oversample,
+                        area_importance_candidate_chunk_size=self.area_importance_candidate_chunk_size,
                         pressure_override=pressure_override,
                     )
                 except RuntimeError as exc:

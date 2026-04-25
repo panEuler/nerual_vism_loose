@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from biomol_surface_unsup.datasets.sampling import (
+    QUERY_GROUP_AREA,
     QUERY_GROUP_CONTAINMENT,
     QUERY_GROUP_GLOBAL,
     QUERY_GROUP_SURFACE_BAND,
@@ -24,6 +25,7 @@ QUERY_GROUP_IDS = {
     "global": QUERY_GROUP_GLOBAL,
     "containment": QUERY_GROUP_CONTAINMENT,
     "surface_band": QUERY_GROUP_SURFACE_BAND,
+    "area": QUERY_GROUP_AREA,
 }
 
 SUPPORTED_LOSSES = (
@@ -53,6 +55,12 @@ def _batched_atomic_union_field(coords: torch.Tensor, radii: torch.Tensor, query
 
 def _masked_count(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     return mask.sum().to(dtype)
+
+
+def _per_sample_count(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    if mask.ndim == 1:
+        mask = mask.unsqueeze(0)
+    return mask.sum(dim=-1).to(dtype)
 
 
 def _group_mask(query_group: torch.Tensor, query_mask: torch.Tensor, group_names: list[str]) -> torch.Tensor:
@@ -203,6 +211,15 @@ def build_loss_fn(cfg: dict[str, object]):
         bbox_volume = _domain_volume_from_batch(batch, pred_sdf)
         if bbox_volume is not None and bbox_volume.numel() == 1 and pred_sdf.shape[0] > 1:
             bbox_volume = bbox_volume.expand(pred_sdf.shape[0])
+        area_importance_volume = batch.get("area_importance_volume")
+        if area_importance_volume is not None:
+            area_importance_volume = torch.as_tensor(
+                area_importance_volume,
+                dtype=pred_sdf.dtype,
+                device=pred_sdf.device,
+            ).reshape(-1)
+            if area_importance_volume.numel() == 1 and pred_sdf.shape[0] > 1:
+                area_importance_volume = area_importance_volume.expand(pred_sdf.shape[0])
         if not query_points.requires_grad:
             query_points = query_points.requires_grad_(True)
 
@@ -210,6 +227,7 @@ def build_loss_fn(cfg: dict[str, object]):
             "global": _group_mask(query_group, query_mask, ["global"]),
             "containment": _group_mask(query_group, query_mask, ["containment"]),
             "surface_band": _group_mask(query_group, query_mask, ["surface_band"]),
+            "area": _group_mask(query_group, query_mask, ["area"]),
         }
         active_groups = {}
         for loss_name in SUPPORTED_LOSSES:
@@ -247,15 +265,50 @@ def build_loss_fn(cfg: dict[str, object]):
         zero_per_sample = pred_sdf.new_zeros((batch_size,))
         area_energy = zero_per_sample
         if component_weights["area"] != 0.0:
-            area_energy = area_loss(
-                pred_sdf,
-                query_points,
-                mask=loss_masks["area"],
-                eps=delta_eps,
-                query_grads=query_grads,
-                domain_volume=bbox_volume,
-                reduction="none",
-            ) * pred_sdf.new_tensor(gamma_0)
+            area_mask = loss_masks["area"]
+            importance_mask = area_mask & base_masks["area"]
+            regular_mask = area_mask & ~base_masks["area"]
+            if area_importance_volume is not None and torch.any(importance_mask):
+                regular_integral = zero_per_sample
+                regular_count = _per_sample_count(regular_mask, pred_sdf.dtype)
+                if torch.any(regular_mask):
+                    regular_integral = area_loss(
+                        pred_sdf,
+                        query_points,
+                        mask=regular_mask,
+                        eps=delta_eps,
+                        query_grads=query_grads,
+                        domain_volume=bbox_volume,
+                        reduction="none",
+                    )
+                importance_integral = area_loss(
+                    pred_sdf,
+                    query_points,
+                    mask=importance_mask,
+                    eps=delta_eps,
+                    query_grads=query_grads,
+                    domain_volume=area_importance_volume,
+                    reduction="none",
+                )
+                importance_count = _per_sample_count(importance_mask, pred_sdf.dtype)
+                total_count = regular_count + importance_count
+                area_integral = torch.where(
+                    total_count > 0,
+                    (regular_integral * regular_count + importance_integral * importance_count)
+                    / total_count.clamp_min(1.0),
+                    zero_per_sample,
+                )
+            else:
+                area_integral = area_loss(
+                    pred_sdf,
+                    query_points,
+                    mask=area_mask,
+                    eps=delta_eps,
+                    query_grads=query_grads,
+                    domain_volume=bbox_volume,
+                    reduction="none",
+                )
+            area_energy = area_integral * pred_sdf.new_tensor(gamma_0)
         tolman_energy = pred_sdf.new_zeros((batch_size,))
         if bbox_volume is not None and component_weights["tolman_curvature"] != 0.0:
             tolman_energy = mean_curvature_integral_fd(
@@ -394,6 +447,9 @@ def build_loss_fn(cfg: dict[str, object]):
         losses["global_count"] = _masked_count(base_masks["global"], pred_sdf.dtype)
         losses["containment_count"] = _masked_count(base_masks["containment"], pred_sdf.dtype)
         losses["surface_band_count"] = _masked_count(base_masks["surface_band"], pred_sdf.dtype)
+        losses["area_query_count"] = _masked_count(base_masks["area"], pred_sdf.dtype)
+        if area_importance_volume is not None:
+            losses["area_importance_volume"] = area_importance_volume.mean()
         delta_band = pred_sdf.detach().abs() <= float(delta_eps)
         heaviside_band = pred_sdf.detach().abs() <= float(heaviside_eps)
         losses["delta_band_count"] = _masked_count(delta_band & query_mask, pred_sdf.dtype)

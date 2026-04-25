@@ -13,6 +13,7 @@ from biomol_surface_unsup.utils.pairwise import chunked_atomic_union_sdf
 QUERY_GROUP_GLOBAL = 0
 QUERY_GROUP_CONTAINMENT = 1
 QUERY_GROUP_SURFACE_BAND = 2
+QUERY_GROUP_AREA = 3
 
 
 def _infer_bond_pairs(
@@ -120,6 +121,17 @@ def _sample_box_surface_band(
     return points
 
 
+def _sample_uniform_box(lower: torch.Tensor, upper: torch.Tensor, num_points: int) -> torch.Tensor:
+    if num_points <= 0:
+        return lower.new_empty((0, 3))
+    return lower.unsqueeze(0) + torch.rand(
+        num_points,
+        3,
+        dtype=lower.dtype,
+        device=lower.device,
+    ) * (upper - lower).unsqueeze(0)
+
+
 def approximate_atomic_union_sdf(coords: torch.Tensor, radii: torch.Tensor, query_points: torch.Tensor) -> torch.Tensor:
     """Toy atomic-union SDF approximation with shape [Q].
 
@@ -136,6 +148,7 @@ def sample_query_points(
     radii: Any | None = None,
     containment_jitter: float = 0.15,
     surface_band_width: float = 0.25,
+    num_area_points: int = 0,
     initialization_mode: str = "tight_atomic",
     loose_surface_padding: float | None = None,
     domain_padding: float | None = None,
@@ -153,6 +166,7 @@ def sample_query_points(
     - global: bbox-uniform samples
     - containment: atom-centered / near-atom anchors
     - surface-band: samples near a toy atomic-union narrow band
+    - area: extra bbox-uniform samples used only to reduce area integral variance
     """
     if torch is None or not isinstance(coords, torch.Tensor):
         raise RuntimeError("sample_query_points requires torch in the current toy training path")
@@ -165,6 +179,7 @@ def sample_query_points(
     num_global = max(1, num_query_points // 2)
     num_containment = max(1, num_query_points // 4)
     num_surface = max(1, num_query_points - num_global - num_containment)
+    num_area = max(0, int(num_area_points))
     total = num_global + num_containment + num_surface
     if total != num_query_points:
         num_surface += num_query_points - total
@@ -186,12 +201,7 @@ def sample_query_points(
         surface_lower, surface_upper = domain_lower, domain_upper
 
     # [Qg, 3]
-    global_samples = domain_lower.unsqueeze(0) + torch.rand(
-        num_global,
-        3,
-        dtype=coords.dtype,
-        device=coords.device,
-    ) * (domain_upper - domain_lower).unsqueeze(0)
+    global_samples = _sample_uniform_box(domain_lower, domain_upper, num_global)
 
     num_atom_containment = max(1, num_containment // 2)
     remaining_containment = num_containment - num_atom_containment
@@ -249,15 +259,28 @@ def sample_query_points(
             sort_index = candidate_field.abs().argsort()
             surface_samples = candidate_points[sort_index[:num_surface]]  # [Qs, 3]
 
-    query_points = torch.cat([global_samples, containment_points, surface_samples], dim=0)  # [Q, 3]
-    query_group = torch.cat(
-        [
-            torch.full((num_global,), QUERY_GROUP_GLOBAL, dtype=torch.long, device=coords.device),
-            torch.full((num_containment,), QUERY_GROUP_CONTAINMENT, dtype=torch.long, device=coords.device),
-            torch.full((num_surface,), QUERY_GROUP_SURFACE_BAND, dtype=torch.long, device=coords.device),
-        ],
-        dim=0,
-    )  # [Q]
+    area_samples = _sample_uniform_box(domain_lower, domain_upper, num_area)
+
+    point_chunks = [global_samples, containment_points, surface_samples]
+    group_chunks = [
+        torch.full((num_global,), QUERY_GROUP_GLOBAL, dtype=torch.long, device=coords.device),
+        torch.full((num_containment,), QUERY_GROUP_CONTAINMENT, dtype=torch.long, device=coords.device),
+        torch.full((num_surface,), QUERY_GROUP_SURFACE_BAND, dtype=torch.long, device=coords.device),
+    ]
+    if num_area > 0:
+        point_chunks.append(area_samples)
+        group_chunks.append(torch.full((num_area,), QUERY_GROUP_AREA, dtype=torch.long, device=coords.device))
+
+    query_points = torch.cat(point_chunks, dim=0)  # [Q, 3]
+    query_group = torch.cat(group_chunks, dim=0)  # [Q]
+
+    sampling_counts = {
+        "global": int(num_global),
+        "containment": int(num_containment),
+        "surface_band": int(num_surface),
+    }
+    if num_area > 0:
+        sampling_counts["area"] = int(num_area)
 
     return {
         "query_points": query_points,
@@ -270,11 +293,7 @@ def sample_query_points(
         "bbox_lower": domain_lower,
         "bbox_upper": domain_upper,
         "bbox_volume": (domain_upper - domain_lower).prod(),
-        "sampling_counts": {
-            "global": int(num_global),
-            "containment": int(num_containment),
-            "surface_band": int(num_surface),
-        },
+        "sampling_counts": sampling_counts,
     }
 
 
