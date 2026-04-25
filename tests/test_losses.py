@@ -22,6 +22,7 @@ from biomol_surface_unsup.training.loss_scheduler import LossWeightScheduler
 from biomol_surface_unsup.training.train_step import train_step
 from biomol_surface_unsup.utils.config import normalize_loss_config
 from biomol_surface_unsup.models.surface_model import SurfaceModel
+from biomol_surface_unsup.geometry.sdf_ops import box_sdf
 
 
 def test_build_loss_and_call() -> None:
@@ -144,6 +145,19 @@ def test_loss_weight_scheduler_linearly_interpolates() -> None:
     assert scheduler.get_weights(0) == pytest.approx({"area": 0.0, "weak_prior": 1.0})
     assert scheduler.get_weights(2) == pytest.approx({"area": 0.5, "weak_prior": 0.5})
     assert scheduler.get_weights(4) == pytest.approx({"area": 1.0, "weak_prior": 0.0})
+
+
+def test_loss_weight_scheduler_step_mode_switches_after_warmup() -> None:
+    scheduler = LossWeightScheduler(
+        initial_weights={"init_sdf": 1.0, "area": 0.0},
+        final_weights={"init_sdf": 0.0, "area": 1.0},
+        warmup_epochs=5,
+        mode="step",
+    )
+
+    assert scheduler.get_weights(0) == pytest.approx({"area": 0.0, "init_sdf": 1.0})
+    assert scheduler.get_weights(4) == pytest.approx({"area": 0.0, "init_sdf": 1.0})
+    assert scheduler.get_weights(5) == pytest.approx({"area": 1.0, "init_sdf": 0.0})
 
 
 def test_area_and_eikonal_backward_remain_finite_at_zero_query_gradients() -> None:
@@ -320,6 +334,79 @@ def test_energy_density_objective_normalizes_vism_terms_per_sample() -> None:
     assert losses["lj_body_energy"].item() == pytest.approx(per_sample_lj_energy.mean().item(), rel=1e-5)
     assert losses["lj_body_density"].item() == pytest.approx(expected_density.item(), rel=1e-5)
     assert losses["total"].item() == pytest.approx(expected_density.item(), rel=1e-5)
+
+
+def test_energy_objective_uses_raw_integrated_vism_terms() -> None:
+    batch, pred_sdf = _build_batch()
+    batch["bbox_volume"] = torch.tensor([10.0, 100.0], dtype=torch.float32)
+    loss_fn = build_loss_fn(
+        {
+            "loss": {
+                "vism_objective": "energy",
+                "losses": {
+                    "containment": {"weight": 0.0, "groups": ["containment"]},
+                    "weak_prior": {"weight": 0.0, "groups": ["surface_band"]},
+                    "init_sdf": {"weight": 0.0, "groups": ["global"]},
+                    "area": {"weight": 0.0, "groups": ["global"]},
+                    "tolman_curvature": {"weight": 0.0, "groups": ["global"]},
+                    "pressure_volume": {"weight": 0.0, "groups": ["global"]},
+                    "lj_body": {"weight": 1.0, "groups": ["global"]},
+                    "electrostatic": {"weight": 0.0, "groups": ["global"]},
+                    "eikonal": {"weight": 0.0, "groups": ["global", "surface_band"]},
+                },
+            }
+        }
+    )
+
+    losses = loss_fn(batch, {"sdf": pred_sdf})
+    global_mask = (batch["query_group"] == QUERY_GROUP_GLOBAL) & batch["query_mask"]
+    per_sample_lj_energy = lj_body_integral(
+        pred_sdf,
+        batch["query_points"],
+        batch["coords"],
+        batch["epsilon"],
+        batch["sigma"],
+        batch["atom_mask"],
+        mask=global_mask,
+        rho_0=0.0334,
+        eps_h=0.1,
+        domain_volume=batch["bbox_volume"],
+        reduction="none",
+    )
+
+    assert losses["lj_body"].item() == pytest.approx(per_sample_lj_energy.mean().item(), rel=1e-5)
+    assert losses["lj_body_energy"].item() == pytest.approx(per_sample_lj_energy.mean().item(), rel=1e-5)
+    assert losses["total"].item() == pytest.approx(per_sample_lj_energy.mean().item(), rel=1e-5)
+
+
+def test_init_sdf_loss_fits_box_sdf_with_mse() -> None:
+    batch, _ = _build_batch()
+    batch["surface_bbox_lower"] = torch.tensor([[-1.0, -1.0, -1.0], [-2.0, -2.0, -2.0]], dtype=torch.float32)
+    batch["surface_bbox_upper"] = torch.tensor([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], dtype=torch.float32)
+    target = box_sdf(batch["query_points"], batch["surface_bbox_lower"], batch["surface_bbox_upper"])
+    pred_sdf = target + 0.5
+    loss_fn = build_loss_fn(
+        {
+            "loss": {
+                "losses": {
+                    "init_sdf": {"weight": 1.0, "groups": ["global", "containment", "surface_band"]},
+                    "containment": {"weight": 0.0, "groups": ["containment"]},
+                    "weak_prior": {"weight": 0.0, "groups": ["surface_band"]},
+                    "area": {"weight": 0.0, "groups": ["global"]},
+                    "tolman_curvature": {"weight": 0.0, "groups": ["global"]},
+                    "pressure_volume": {"weight": 0.0, "groups": ["global"]},
+                    "lj_body": {"weight": 0.0, "groups": ["global"]},
+                    "electrostatic": {"weight": 0.0, "groups": ["global"]},
+                    "eikonal": {"weight": 0.0, "groups": ["global"]},
+                },
+            }
+        }
+    )
+
+    losses = loss_fn(batch, {"sdf": pred_sdf})
+
+    assert losses["init_sdf"].item() == pytest.approx(0.25)
+    assert losses["total"].item() == pytest.approx(0.25)
 
 
 def test_energy_density_objective_requires_bbox_volume() -> None:

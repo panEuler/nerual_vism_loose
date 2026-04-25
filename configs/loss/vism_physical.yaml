@@ -1,14 +1,17 @@
-# VISM-style objective with loose-box residual initialization.
-# The physical components are evaluated as energy density G_i / bbox_volume_i.
-vism_objective: energy_density
+# VISM-style objective with direct-SDF output.
+# The physical components are optimized as raw integrated energies G_i on the bbox domain.
+vism_objective: energy
 weak_prior_target: box
 
 losses:
+  init_sdf:
+    weight: 1.0
+    groups: [global, containment, surface_band]
   containment:
     weight: 0.0
     groups: [containment]
   weak_prior:
-    weight: 0.2
+    weight: 0.0
     groups: [surface_band]
   area:
     weight: 1.0
@@ -42,23 +45,20 @@ delta_eps: 0.1
 containment_margin: 0.5
 
 anneal:
-  warmup_epochs: 20
-  initial_pressure: 0.07
-  pressure_warmup_epochs: 10
-  initial_groups:
-    weak_prior: [containment, surface_band]
-  final_groups:
-    weak_prior: [surface_band]
+  schedule: step
+  warmup_epochs: 5
   initial_weights:
+    init_sdf: 1.0
     containment: 0.0
-    weak_prior: 0.2
-    area: 1.0
+    weak_prior: 0.0
+    area: 0.0
     tolman_curvature: 0.0
-    pressure_volume: 1.0
-    lj_body: 1.0
-    electrostatic: 1.0
-    eikonal: 0.1
+    pressure_volume: 0.0
+    lj_body: 0.0
+    electrostatic: 0.0
+    eikonal: 0.0
   final_weights:
+    init_sdf: 0.0
     containment: 0.0
     weak_prior: 0.0
     area: 1.0

@@ -15,6 +15,7 @@ from biomol_surface_unsup.losses.vdw import lj_body_integral
 from biomol_surface_unsup.losses.pressure_volume import pressure_volume_loss
 from biomol_surface_unsup.losses.weak_prior import weak_prior_loss
 from biomol_surface_unsup.legacy.losses import build_loss as _legacy_build_loss
+from biomol_surface_unsup.geometry.sdf_ops import box_sdf
 from biomol_surface_unsup.utils.pairwise import chunked_smooth_atomic_union_field
 from biomol_surface_unsup.utils.config import normalize_loss_config
 
@@ -26,6 +27,7 @@ QUERY_GROUP_IDS = {
 }
 
 SUPPORTED_LOSSES = (
+    "init_sdf",
     "containment",
     "weak_prior",
     "area",
@@ -61,6 +63,23 @@ def _group_mask(query_group: torch.Tensor, query_mask: torch.Tensor, group_names
             raise ValueError(f"unsupported query group '{group_name}', expected one of: {supported}")
         mask = mask | (query_group == QUERY_GROUP_IDS[group_name])
     return mask & query_mask
+
+
+def _box_init_sdf_loss(
+    query_points: torch.Tensor,
+    pred_sdf: torch.Tensor,
+    mask: torch.Tensor,
+    bbox_lower: torch.Tensor | None,
+    bbox_upper: torch.Tensor | None,
+) -> torch.Tensor:
+    if bbox_lower is None or bbox_upper is None:
+        raise ValueError("init_sdf loss requires bbox_lower and bbox_upper for the box SDF target")
+    if not torch.any(mask):
+        return pred_sdf.new_zeros(())
+    with torch.no_grad():
+        target = box_sdf(query_points, bbox_lower, bbox_upper)
+    diff = pred_sdf - target
+    return diff[mask].pow(2).mean()
 
 
 def _domain_volume_from_batch(batch: dict[str, torch.Tensor], reference: torch.Tensor) -> torch.Tensor | None:
@@ -309,6 +328,7 @@ def build_loss_fn(cfg: dict[str, object]):
         selected_components = component_density if vism_objective == "energy_density" else component_energy
 
         losses = {
+            "init_sdf": pred_sdf.new_zeros(()),
             "weak_prior": weak_prior_loss(
                 coords,
                 radii,
@@ -332,6 +352,14 @@ def build_loss_fn(cfg: dict[str, object]):
                 mask=loss_masks["containment"],
             ),
         }
+        if effective_weight("init_sdf", loss_weights) != 0.0:
+            losses["init_sdf"] = _box_init_sdf_loss(
+                query_points,
+                pred_sdf,
+                loss_masks["init_sdf"],
+                surface_bbox_lower,
+                surface_bbox_upper,
+            )
         for loss_name in VISM_COMPONENT_LOSSES:
             losses[loss_name] = selected_components[loss_name].mean()
             losses[f"{loss_name}_energy"] = component_energy[loss_name].mean()

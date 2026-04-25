@@ -289,6 +289,10 @@ def train_step(
 
     metrics = {k: float(v.detach().cpu()) for k, v in losses.items()}
     metrics.update(adaptive_metrics)
+    sdf_detached = out["sdf"].detach()
+    metrics["sdf_mean"] = float(sdf_detached.mean().cpu())
+    metrics["sdf_abs_mean"] = float(sdf_detached.abs().mean().cpu())
+    metrics["sdf_abs_max"] = float(sdf_detached.abs().max().cpu())
     raw_residual = out.get("raw_residual")
     base_phi = out.get("base_phi")
     if raw_residual is not None:

@@ -4,6 +4,7 @@ import yaml
 
 
 DEFAULT_LOSS_GROUPS = {
+    "init_sdf": ["global", "containment", "surface_band"],
     "containment": ["containment"],
     "weak_prior": ["surface_band"],
     "area": ["surface_band"],
@@ -15,6 +16,7 @@ DEFAULT_LOSS_GROUPS = {
 }
 
 DEFAULT_LOSS_WEIGHTS = {
+    "init_sdf": 0.0,
     "containment": 0.0,
     "weak_prior": 0.5,
     "area": 1.0,

@@ -99,6 +99,7 @@ class Trainer:
                 warmup_epochs=int(anneal_cfg.get("warmup_epochs", 0)),
                 initial_groups=initial_groups,
                 final_groups=final_groups,
+                mode=str(anneal_cfg.get("schedule", anneal_cfg.get("weight_schedule", "linear"))),
             )
         # Pressure annealing: step-function schedule for the pressure parameter.
         self.pressure_schedule = None
@@ -186,10 +187,14 @@ class Trainer:
         for name in ("area", "tolman_curvature", "pressure_volume", "lj_body"):
             if name in metrics:
                 summary[name] = round(float(metrics[name]), 6)
+        if "init_sdf" in metrics:
+            summary["init_sdf"] = round(float(metrics["init_sdf"]), 6)
         for name in ("vism_total_energy", "vism_total_density"):
             if name in metrics:
                 summary[name] = round(float(metrics[name]), 6)
         for name in (
+            "sdf_abs_mean",
+            "sdf_abs_max",
             "raw_residual_abs_mean",
             "raw_residual_abs_max",
             "sdf_minus_base_abs_mean",

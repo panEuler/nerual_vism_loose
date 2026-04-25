@@ -1,4 +1,4 @@
-name: local_egnn_box_residual
+name: local_egnn_direct_sdf
 
 local_builder:
   atom_embed_dim: 256
@@ -26,6 +26,6 @@ position_encoding:
   n_freq: 6
 
 sdf_base:
-  type: box
+  type: none
   residual_scale: 1.0
   zero_init_output: true

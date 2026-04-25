@@ -9,6 +9,7 @@ class LossWeightScheduler:
         warmup_epochs: int,
         initial_groups: dict[str, list[str]] | None = None,
         final_groups: dict[str, list[str]] | None = None,
+        mode: str = "linear",
     ) -> None:
         self.initial_weights = {key: float(value) for key, value in initial_weights.items()}
         self.final_weights = {key: float(value) for key, value in final_weights.items()}
@@ -16,8 +17,15 @@ class LossWeightScheduler:
         self.loss_names = sorted(set(self.initial_weights) | set(self.final_weights))
         self.initial_groups = {key: list(value) for key, value in (initial_groups or {}).items()}
         self.final_groups = {key: list(value) for key, value in (final_groups or {}).items()}
+        self.mode = str(mode).lower()
+        if self.mode not in {"linear", "step"}:
+            raise ValueError("LossWeightScheduler mode must be either 'linear' or 'step'")
 
     def get_weights(self, epoch: int) -> dict[str, float]:
+        if self.mode == "step":
+            source = self.initial_weights if max(int(epoch), 0) < self.warmup_epochs else self.final_weights
+            fallback = self.final_weights if source is self.initial_weights else self.initial_weights
+            return {name: source.get(name, fallback.get(name, 0.0)) for name in self.loss_names}
         if self.warmup_epochs == 0:
             return {name: self.final_weights.get(name, self.initial_weights.get(name, 0.0)) for name in self.loss_names}
         alpha = min(max(epoch, 0), self.warmup_epochs) / float(self.warmup_epochs)
