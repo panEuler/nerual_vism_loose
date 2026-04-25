@@ -45,8 +45,12 @@ delta_eps: 0.1
 containment_margin: 0.5
 
 anneal:
-  schedule: step
-  warmup_epochs: 5
+  # epoch 0-4: fit bbox SDF only.
+  # epoch 5-54: gradually hand control to the raw VISM energy.
+  # epoch >=55: keep a weak bbox-SDF anchor so the zero level-set does not vanish.
+  schedule: staged
+  pretrain_epochs: 5
+  ramp_epochs: 50
   initial_weights:
     init_sdf: 1.0
     containment: 0.0
@@ -58,7 +62,7 @@ anneal:
     electrostatic: 0.0
     eikonal: 0.0
   final_weights:
-    init_sdf: 0.0
+    init_sdf: 0.01
     containment: 0.0
     weak_prior: 0.0
     area: 1.0

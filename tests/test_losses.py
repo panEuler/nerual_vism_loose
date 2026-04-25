@@ -160,6 +160,23 @@ def test_loss_weight_scheduler_step_mode_switches_after_warmup() -> None:
     assert scheduler.get_weights(5) == pytest.approx({"area": 1.0, "init_sdf": 0.0})
 
 
+def test_loss_weight_scheduler_staged_mode_pretrains_then_ramps() -> None:
+    scheduler = LossWeightScheduler(
+        initial_weights={"init_sdf": 1.0, "area": 0.0},
+        final_weights={"init_sdf": 0.01, "area": 1.0},
+        warmup_epochs=0,
+        mode="staged",
+        pretrain_epochs=5,
+        ramp_epochs=10,
+    )
+
+    assert scheduler.get_weights(0) == pytest.approx({"area": 0.0, "init_sdf": 1.0})
+    assert scheduler.get_weights(4) == pytest.approx({"area": 0.0, "init_sdf": 1.0})
+    assert scheduler.get_weights(5) == pytest.approx({"area": 0.1, "init_sdf": 0.901})
+    assert scheduler.get_weights(10) == pytest.approx({"area": 0.6, "init_sdf": 0.406})
+    assert scheduler.get_weights(15) == pytest.approx({"area": 1.0, "init_sdf": 0.01})
+
+
 def test_area_and_eikonal_backward_remain_finite_at_zero_query_gradients() -> None:
     query_points = torch.zeros((1, 4, 3), dtype=torch.float32, requires_grad=True)
     pred_sdf = (query_points * 0.0).sum(dim=-1)

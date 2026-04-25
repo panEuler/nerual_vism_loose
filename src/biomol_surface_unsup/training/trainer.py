@@ -100,6 +100,8 @@ class Trainer:
                 initial_groups=initial_groups,
                 final_groups=final_groups,
                 mode=str(anneal_cfg.get("schedule", anneal_cfg.get("weight_schedule", "linear"))),
+                pretrain_epochs=int(anneal_cfg.get("pretrain_epochs", anneal_cfg.get("init_epochs", 0))),
+                ramp_epochs=anneal_cfg.get("ramp_epochs"),
             )
         # Pressure annealing: step-function schedule for the pressure parameter.
         self.pressure_schedule = None
