@@ -121,6 +121,7 @@ class Trainer:
                 pretrain_epochs=int(anneal_cfg.get("pretrain_epochs", anneal_cfg.get("init_epochs", 0))),
                 ramp_epochs=anneal_cfg.get("ramp_epochs"),
             )
+        self.best_model_physical_start_epoch = self._physical_best_start_epoch(self.loss_weight_scheduler)
         # Pressure annealing: step-function schedule for the pressure parameter.
         self.pressure_schedule = None
         if "initial_pressure" in anneal_cfg:
@@ -171,6 +172,33 @@ class Trainer:
             step=step,
             metrics=metrics,
         )
+
+    @staticmethod
+    def _physical_best_start_epoch(scheduler: LossWeightScheduler | None) -> int | None:
+        if scheduler is None:
+            return None
+        if scheduler.mode == "staged":
+            return scheduler.pretrain_epochs + scheduler.ramp_epochs
+        return scheduler.warmup_epochs
+
+    def _best_model_metric_name(self, epoch: int) -> str:
+        if (
+            self.best_model_physical_start_epoch is not None
+            and epoch >= self.best_model_physical_start_epoch
+        ):
+            return "vism_objective"
+        return "total"
+
+    @staticmethod
+    def _best_model_metric_value(metrics: dict[str, float], metric_name: str) -> tuple[float, str]:
+        fallback_names = {
+            "vism_objective": ("vism_objective", "vism_total", "vism_density", "total"),
+            "total": ("total",),
+        }
+        for candidate in fallback_names.get(metric_name, (metric_name, "total")):
+            if candidate in metrics:
+                return float(metrics[candidate]), candidate
+        raise KeyError(f"best-model metric '{metric_name}' is missing from training metrics")
 
     @staticmethod
     def _batch_debug_summary(batch: dict) -> dict[str, object]:
@@ -252,10 +280,11 @@ class Trainer:
     def train(self):
         num_epochs = int(self.cfg["train"].get("epochs", 1))
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        best_loss = float('inf')
+        best_scores = {}
 
         for epoch in range(self.start_epoch, num_epochs):
             loss_weights = None if self.loss_weight_scheduler is None else self.loss_weight_scheduler.get_weights(epoch)
+            best_metric_name = self._best_model_metric_name(epoch)
             loss_group_overrides = None
             if self.loss_weight_scheduler is not None:
                 group_overrides = self.loss_weight_scheduler.get_groups(epoch)
@@ -276,6 +305,8 @@ class Trainer:
                 print(f"[trainer] epoch={epoch} pressure={pressure_override}")
             latest_metrics = None
             epoch_total_loss = 0.0
+            epoch_best_score = 0.0
+            actual_best_metric_name = best_metric_name
             num_batches = 0
 
             for step, batch in enumerate(self.train_loader):
@@ -309,6 +340,11 @@ class Trainer:
                 latest_metrics = metrics
                 
                 epoch_total_loss += metrics.get("total", 0.0)
+                batch_best_score, actual_best_metric_name = self._best_model_metric_value(
+                    metrics,
+                    best_metric_name,
+                )
+                epoch_best_score += batch_best_score
                 num_batches += 1
                 
                 if step % self.log_every == 0:
@@ -324,18 +360,27 @@ class Trainer:
                 
                 if num_batches > 0:
                     avg_loss = epoch_total_loss / num_batches
-                    if avg_loss < best_loss:
-                        best_loss = avg_loss
+                    avg_best_score = epoch_best_score / num_batches
+                    if avg_best_score < best_scores.get(best_metric_name, float("inf")):
+                        best_scores[best_metric_name] = avg_best_score
                         best_path = self.output_dir / "best_model.pt"
+                        checkpoint_metrics = dict(latest_metrics)
+                        checkpoint_metrics["best_model_score"] = avg_best_score
+                        checkpoint_metrics["best_model_metric"] = actual_best_metric_name
+                        checkpoint_metrics["epoch_avg_total"] = avg_loss
                         save_checkpoint(
                             best_path,
                             self.model,
                             optimizer=self.optimizer,
                             epoch=epoch,
                             step=self.global_step,
-                            metrics=latest_metrics,
+                            metrics=checkpoint_metrics,
                         )
-                        print(f"[*] Saved new best model at epoch {epoch} with avg loss: {best_loss:.4f}")
+                        print(
+                            f"[*] Saved new best model at epoch {epoch} "
+                            f"with avg {actual_best_metric_name}: {avg_best_score:.4f} "
+                            f"(avg total: {avg_loss:.4f})"
+                        )
 
                 if self.save_every > 0 and ((epoch + 1) % self.save_every == 0 or epoch == num_epochs - 1):
                     self._save_checkpoint(epoch=epoch, step=self.global_step, metrics=latest_metrics)

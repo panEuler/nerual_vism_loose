@@ -1,6 +1,6 @@
 # VISM-style objective with direct-SDF output.
-# The physical components are optimized as raw integrated energies G_i on the bbox domain.
-vism_objective: energy
+# Optimize physical components as bbox-volume-normalized energy densities.
+vism_objective: energy_density
 weak_prior_target: box
 
 losses:
